@@ -108,6 +108,38 @@ function isIgnoredContact(jid, participant = null) {
     return list.some(num => (jid && jid.includes(num)) || (participant && participant.includes(num)));
 }
 
+// LID থেকে ফোন নম্বর JID (@s.whatsapp.net) এ কনভার্ট করার ফাংশন (যাতে নিজের সব ডিভাইসেও সিঙ্ক হয়)
+function resolveToPnJid(jid, msg = null) {
+    if (!jid) return jid;
+    if (jid.endsWith('@s.whatsapp.net')) return jid;
+
+    // ১. মেসেজের মধ্যে সরাসরি ফোন নম্বর থাকলে
+    if (msg) {
+        const pn = msg.senderpn || msg.key?.participantPn || msg.participantPn;
+        if (pn) {
+            const clean = String(pn).replace(/[^0-9]/g, '');
+            if (clean) return `${clean}@s.whatsapp.net`;
+        }
+    }
+
+    // ২. baileys_auth_info এর lid-mapping থেকে ফোন নম্বর বের করা
+    if (jid.endsWith('@lid')) {
+        const lidUser = jid.split('@')[0];
+        const reverseFile = path.join(__dirname, 'baileys_auth_info', `lid-mapping-${lidUser}_reverse.json`);
+        try {
+            if (fs.existsSync(reverseFile)) {
+                const rawPn = JSON.parse(fs.readFileSync(reverseFile, 'utf8'));
+                if (rawPn) {
+                    const clean = String(rawPn).replace(/[^0-9]/g, '');
+                    if (clean) return `${clean}@s.whatsapp.net`;
+                }
+            }
+        } catch (_) {}
+    }
+
+    return jid;
+}
+
 // ৪. এজেন্ট স্টেট (অন / অফ টগল) ও লাইভ লগস
 let isAgentActive = config.defaultActive;
 let isConnected = false;
@@ -271,11 +303,13 @@ async function startWhatsAppBot() {
     sock.ev.on('call', async (calls) => {
         for (const call of calls) {
             const callId = call.id;
-            const callerJid = call.chatId || call.from;
+            const rawCallerJid = call.chatId || call.from;
 
-            if (!callerJid || call.isGroup || callerJid.endsWith('@g.us')) continue;
-            if (isIgnoredContact(callerJid)) continue;
+            if (!rawCallerJid || call.isGroup || rawCallerJid.endsWith('@g.us')) continue;
+            if (isIgnoredContact(rawCallerJid)) continue;
             if (!isAgentActive) continue;
+
+            const callerJid = resolveToPnJid(rawCallerJid);
 
             let session = callSessions.get(callId);
             if (!session) {
@@ -295,11 +329,12 @@ async function startWhatsAppBot() {
             const isRejectedOrMissed = (call.status === 'reject' || call.status === 'timeout' || call.status === 'terminate');
 
             if (isRejectedOrMissed && !session.accepted) {
-                const lastSent = lastCallReplyTimestamps.get(callerJid) || 0;
+                const lastSent = lastCallReplyTimestamps.get(callerJid) || lastCallReplyTimestamps.get(rawCallerJid) || 0;
                 if (Date.now() - lastSent < 20000) {
                     continue;
                 }
                 lastCallReplyTimestamps.set(callerJid, Date.now());
+                lastCallReplyTimestamps.set(rawCallerJid, Date.now());
 
                 const actionLabel = call.status === 'reject' ? 'কল কেটে দেওয়া হয়েছে' : 'মিসড কল';
                 console.log(`\n📞 [${actionLabel}] ${callerJid} (রিসিভ করা হয়নি)। অটো-মেসেজ পাঠানো হচ্ছে...`);
@@ -308,6 +343,9 @@ async function startWhatsAppBot() {
 
                 try {
                     await sock.sendMessage(callerJid, { text: callReplyMessage });
+                    if (callerJid !== rawCallerJid) {
+                        try { await sock.sendMessage(rawCallerJid, { text: callReplyMessage }); } catch (_) {}
+                    }
                     addToHistory(callerJid, 'user', `[Call: ${actionLabel}]`);
                     addToHistory(callerJid, 'model', callReplyMessage);
                     addLog(`📞 [কল]: ${callerJid} (${actionLabel} -> অটো-মেসেজ পাঠানো হয়েছে)`);
@@ -416,23 +454,29 @@ async function startWhatsAppBot() {
             if (isMissedCall) {
                 if (!isAgentActive) continue;
 
+                const targetJid = resolveToPnJid(jid, msg);
+
                 // যদি গত ২০ সেকেন্ডের মধ্যে অলরেডি কল রিপ্লাই গিয়ে থাকে তবে ডুপ্লিকেট পাঠাবে না
-                const lastSent = lastCallReplyTimestamps.get(jid) || 0;
+                const lastSent = lastCallReplyTimestamps.get(targetJid) || lastCallReplyTimestamps.get(jid) || 0;
                 if (Date.now() - lastSent < 20000) {
                     continue;
                 }
+                lastCallReplyTimestamps.set(targetJid, Date.now());
                 lastCallReplyTimestamps.set(jid, Date.now());
 
-                console.log(`\n📞 [প্রকৃত মিসড কল শনাক্ত] ${jid} কল করেছিলেন কিন্তু রিসিভ করা হয়নি।`);
+                console.log(`\n📞 [প্রকৃত মিসড কল শনাক্ত] ${targetJid} কল করেছিলেন কিন্তু রিসিভ করা হয়নি।`);
 
                 const missedCallMessage = `আসসালামু আলাইকুম। দুঃখিত, ${config.ownerName} এই মুহূর্তে একটু ব্যস্ত থাকায় আপনার কলটি রিসিভ করতে পারেননি। তিনি ফ্রি হয়ে যত দ্রুত সম্ভব আপনার সাথে যোগাযোগ করবেন।\n\nআপনার কোনো জরুরি কথা বা বার্তা থাকলে এখানে লিখে রাখতে পারেন, আমি স্যারকে জানিয়ে দেব।`;
 
                 try {
-                    await sock.sendMessage(jid, { text: missedCallMessage });
-                    addToHistory(jid, 'user', '[Missed Call: কল করেছিলেন কিন্তু রিসিভ করা হয়নি]');
-                    addToHistory(jid, 'model', missedCallMessage);
-                    addLog(`📞 [মিসড কল]: ${jid} থেকে মিসড কল এসেছিল (অটো-মেসেজ পাঠানো হয়েছে)`);
-                    console.log(`📤 মিসড কলের অটো-রিপ্লাই সফলভাবে পাঠানো হয়েছে: ${jid}`);
+                    await sock.sendMessage(targetJid, { text: missedCallMessage });
+                    if (targetJid !== jid) {
+                        try { await sock.sendMessage(jid, { text: missedCallMessage }); } catch (_) {}
+                    }
+                    addToHistory(targetJid, 'user', '[Missed Call: কল করেছিলেন কিন্তু রিসিভ করা হয়নি]');
+                    addToHistory(targetJid, 'model', missedCallMessage);
+                    addLog(`📞 [মিসড কল]: ${targetJid} থেকে মিসড কল এসেছিল (অটো-মেসেজ পাঠানো হয়েছে)`);
+                    console.log(`📤 মিসড কলের অটো-রিপ্লাই সফলভাবে পাঠানো হয়েছে: ${targetJid}`);
                 } catch (err) {
                     console.error('❌ মিসড কল রিপ্লাই পাঠাতে সমস্যা:', err.message);
                 }
@@ -444,38 +488,45 @@ async function startWhatsAppBot() {
             // -------------------------------------------------------------
             if (!isAgentActive || fromMe || !messageText) continue;
 
+            // লক্ষ্য JID নির্ধারণ (LID হলে মূল ফোন নম্বরে রূপান্তর যাতে নিজের ডিভাইসেও চ্যাটে দৃশ্যমান হয়)
+            const targetJid = resolveToPnJid(jid, msg);
+
             const senderName = msg.pushName || 'User';
-            console.log(`\n📩 [নতুন মেসেজ] ${senderName} (${jid}): "${messageText}"`);
+            console.log(`\n📩 [নতুন মেসেজ] ${senderName} (${targetJid}): "${messageText}"`);
             addLog(`📩 [মেসেজ] ${senderName}: "${messageText.substring(0, 30)}"`);
 
             try {
                 // টাইপিং স্টেট প্রদর্শন
-                await sock.sendPresenceUpdate('composing', jid);
+                await sock.sendPresenceUpdate('composing', targetJid);
 
                 // মেমোরি ও Gemini চ্যাট সেশন
-                const history = getChatHistory(jid);
+                const history = getChatHistory(targetJid);
                 const chatSession = model.startChat({ history });
 
                 const result = await chatSession.sendMessage(messageText);
                 const replyText = result.response.text().trim();
 
                 // মেমোরিতে সেভ
-                addToHistory(jid, 'user', messageText);
-                addToHistory(jid, 'model', replyText);
+                addToHistory(targetJid, 'user', messageText);
+                addToHistory(targetJid, 'model', replyText);
 
-                // রিপ্লাই পাঠানো
-                await sock.sendMessage(jid, { text: replyText }, { quoted: msg });
+                // রিপ্লাই পাঠানো (targetJid তে পাঠালে তা আপনার ফোন ও ডেস্কটপ চ্যাটলিস্টে ✔✔ সহ সুন্দরভাবে দেখাবে)
+                await sock.sendMessage(targetJid, { text: replyText });
+                if (targetJid !== jid) {
+                    try { await sock.sendMessage(jid, { text: replyText }); } catch (_) {}
+                }
+
                 repliedCount++;
                 addLog(`📤 [রিপ্লাই -> ${senderName}]: "${replyText.substring(0, 35)}..."`);
 
                 console.log(`📤 [রিপ্লাই পাঠানো হয়েছে]: "${replyText}"`);
 
-                await sock.sendPresenceUpdate('paused', jid);
+                await sock.sendPresenceUpdate('paused', targetJid);
 
             } catch (error) {
                 console.error('❌ রিপ্লাই তৈরিতে সমস্যা:', error.message);
                 try {
-                    await sock.sendPresenceUpdate('paused', jid);
+                    await sock.sendPresenceUpdate('paused', targetJid);
                 } catch (_) {}
             }
         }
