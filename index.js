@@ -263,7 +263,63 @@ async function startWhatsAppBot() {
         }
     });
 
-    // ৬. ইনকামিং মেসেজ ও মিসড কল হ্যান্ডলিং
+    // কল ট্র্যাকিং স্টেট (কল রিসিভ করা হয়েছে নাকি কেটে দেওয়া/মিসড হয়েছে)
+    const callSessions = new Map();
+    const lastCallReplyTimestamps = new Map();
+
+    // ৬. কল হ্যান্ডলিং ইভেন্ট (কল কেটে দেওয়া বা মিসড কল শনাক্তকরণ)
+    sock.ev.on('call', async (calls) => {
+        for (const call of calls) {
+            const callId = call.id;
+            const callerJid = call.chatId || call.from;
+
+            if (!callerJid || call.isGroup || callerJid.endsWith('@g.us')) continue;
+            if (isIgnoredContact(callerJid)) continue;
+            if (!isAgentActive) continue;
+
+            let session = callSessions.get(callId);
+            if (!session) {
+                session = { callerJid, accepted: false, createdAt: Date.now() };
+                callSessions.set(callId, session);
+                setTimeout(() => callSessions.delete(callId), 10 * 60 * 1000);
+            }
+
+            // আপনি নিজে ফোন রিসিভ করে কথা বললে 'accept' হবে
+            if (call.status === 'accept') {
+                session.accepted = true;
+                console.log(`📞 [কল রিসিভ করা হয়েছে] ${callerJid}-এর সাথে কথা বলা হচ্ছে (কোনো অটো-রিপ্লাই যাবে না)`);
+                continue;
+            }
+
+            // আপনি যদি কল কেটে দেন (reject), কিংবা রিং হয়ে কেটে যায় (timeout), কিংবা রিসিভ করার আগেই শেষ হয় (terminate without accept)
+            const isRejectedOrMissed = (call.status === 'reject' || call.status === 'timeout' || call.status === 'terminate');
+
+            if (isRejectedOrMissed && !session.accepted) {
+                const lastSent = lastCallReplyTimestamps.get(callerJid) || 0;
+                if (Date.now() - lastSent < 20000) {
+                    continue;
+                }
+                lastCallReplyTimestamps.set(callerJid, Date.now());
+
+                const actionLabel = call.status === 'reject' ? 'কল কেটে দেওয়া হয়েছে' : 'মিসড কল';
+                console.log(`\n📞 [${actionLabel}] ${callerJid} (রিসিভ করা হয়নি)। অটো-মেসেজ পাঠানো হচ্ছে...`);
+
+                const callReplyMessage = `আসসালামু আলাইকুম। দুঃখিত, ${config.ownerName} এই মুহূর্তে একটু ব্যস্ত থাকায় আপনার কলটি রিসিভ করতে পারেননি। তিনি ফ্রি হয়ে যত দ্রুত সম্ভব আপনার সাথে যোগাযোগ করবেন।\n\nআপনার কোনো জরুরি কথা বা বার্তা থাকলে এখানে লিখে রাখতে পারেন, আমি স্যারকে জানিয়ে দেব।`;
+
+                try {
+                    await sock.sendMessage(callerJid, { text: callReplyMessage });
+                    addToHistory(callerJid, 'user', `[Call: ${actionLabel}]`);
+                    addToHistory(callerJid, 'model', callReplyMessage);
+                    addLog(`📞 [কল]: ${callerJid} (${actionLabel} -> অটো-মেসেজ পাঠানো হয়েছে)`);
+                    console.log(`📤 কলের অটো-রিপ্লাই সফলভাবে পাঠানো হয়েছে: ${callerJid}`);
+                } catch (err) {
+                    console.error('❌ কলের রিপ্লাই পাঠাতে সমস্যা:', err.message);
+                }
+            }
+        }
+    });
+
+    // ৭. ইনকামিং মেসেজ ও মিসড কল হ্যান্ডলিং
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
 
@@ -360,9 +416,16 @@ async function startWhatsAppBot() {
             if (isMissedCall) {
                 if (!isAgentActive) continue;
 
+                // যদি গত ২০ সেকেন্ডের মধ্যে অলরেডি কল রিপ্লাই গিয়ে থাকে তবে ডুপ্লিকেট পাঠাবে না
+                const lastSent = lastCallReplyTimestamps.get(jid) || 0;
+                if (Date.now() - lastSent < 20000) {
+                    continue;
+                }
+                lastCallReplyTimestamps.set(jid, Date.now());
+
                 console.log(`\n📞 [প্রকৃত মিসড কল শনাক্ত] ${jid} কল করেছিলেন কিন্তু রিসিভ করা হয়নি।`);
 
-                const missedCallMessage = `আসসালামু আলাইকুম। দুঃখিত, ${config.ownerName} এই মুহূর্তে আপনার কলটি রিসিভ করতে পারেননি। তিনি ফ্রি হয়ে যত দ্রুত সম্ভব আপনার সাথে যোগাযোগ করবেন।\n\nআপনার কোনো জরুরি কথা বা বার্তা থাকলে এখানে লিখে রাখতে পারেন, আমি স্যারকে জানিয়ে দেব।`;
+                const missedCallMessage = `আসসালামু আলাইকুম। দুঃখিত, ${config.ownerName} এই মুহূর্তে একটু ব্যস্ত থাকায় আপনার কলটি রিসিভ করতে পারেননি। তিনি ফ্রি হয়ে যত দ্রুত সম্ভব আপনার সাথে যোগাযোগ করবেন।\n\nআপনার কোনো জরুরি কথা বা বার্তা থাকলে এখানে লিখে রাখতে পারেন, আমি স্যারকে জানিয়ে দেব।`;
 
                 try {
                     await sock.sendMessage(jid, { text: missedCallMessage });
