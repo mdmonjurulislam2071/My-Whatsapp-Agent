@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>WhatsApp AI Agent Controller</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .glass {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .toggle-dot {
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center justify-between p-4 selection:bg-emerald-500 selection:text-white">
+
+    <!-- Top Header -->
+    <header class="w-full max-w-md pt-4 pb-2 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                <svg class="w-5 h-5 text-slate-950" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2C6.48 2 2 6.48 2 12c0 1.82.49 3.53 1.34 5.01L2 22l5.12-1.31C8.56 21.52 10.23 22 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2zm0 18c-1.58 0-3.07-.44-4.35-1.2l-.31-.18-3.04.78.81-2.96-.2-.32C4.12 14.85 3.66 13.46 3.66 12c0-4.6 3.74-8.34 8.34-8.34 4.6 0 8.34 3.74 8.34 8.34 0 4.6-3.74 8.34-8.34 8.34z"/>
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-base font-bold tracking-tight text-white">AI Agent Controller</h1>
+                <p class="text-xs text-slate-400 font-medium" id="ownerNameDisplay">Md. Monjurul Islam Sir</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-2 glass px-3 py-1.5 rounded-full" id="connectionBadge">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="text-xs font-semibold text-emerald-400">Connected</span>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="w-full max-w-md flex-1 flex flex-col justify-center space-y-6 my-6">
+
+        <!-- QR Code Card (Shown only when WhatsApp is not linked yet) -->
+        <div id="qrCard" class="hidden glass rounded-3xl p-6 shadow-2xl text-center space-y-4">
+            <h2 class="text-lg font-bold text-white">WhatsApp কানেক্ট করুন</h2>
+            <p class="text-xs text-slate-400">নিচের QR কোডটি আপনার ফোনের WhatsApp দিয়ে স্ক্যান করে নিন:</p>
+            <div class="bg-white p-3 rounded-2xl inline-block shadow-2xl shadow-emerald-500/10">
+                <img id="qrImage" src="" alt="WhatsApp QR Code" class="w-60 h-60 object-contain">
+            </div>
+            <p class="text-[11px] text-slate-400">WhatsApp > Linked Devices > Link a Device</p>
+        </div>
+
+        <!-- Master Switch Card -->
+        <div id="controlCard" class="glass rounded-3xl p-6 shadow-2xl relative overflow-hidden text-center">
+            <div class="absolute -top-24 -left-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" id="glowLight"></div>
+
+            <p class="text-xs uppercase tracking-widest font-semibold text-slate-400 mb-2">Agent Status</p>
+
+            <div class="my-4">
+                <span id="statusText" class="text-3xl font-extrabold text-emerald-400 tracking-tight transition-colors duration-300">ACTIVE</span>
+                <p id="statusDesc" class="text-xs text-slate-400 mt-1">স্বয়ংক্রিয়ভাবে ইনকামিং মেসেজের রিপ্লাই দেওয়া হচ্ছে</p>
+            </div>
+
+            <!-- Big Toggle Button -->
+            <div class="flex justify-center mt-6">
+                <button id="toggleBtn" onclick="toggleAgent()" class="relative inline-flex h-20 w-40 items-center justify-between rounded-full bg-slate-800 p-2 shadow-inner transition-colors duration-300 focus:outline-none focus:ring-4 focus:ring-emerald-500/30">
+                    <span class="sr-only">Toggle Agent</span>
+                    <span id="btnBg" class="absolute inset-0 rounded-full bg-emerald-600 transition-colors duration-300"></span>
+                    <span id="toggleKnob" class="toggle-dot relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-xl transform translate-x-20">
+                        <svg id="knobIcon" class="w-8 h-8 text-emerald-600 transition-colors duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                    </span>
+                    <span id="switchLabel" class="absolute left-6 text-sm font-extrabold tracking-wider uppercase text-white transition-opacity duration-300">ON</span>
+                </button>
+            </div>
+
+            <p class="text-[11px] text-slate-400 mt-4">বাটনে ক্লিক করে যেকোনো সময় চালু বা বন্ধ করতে পারেন</p>
+        </div>
+
+        <!-- Quick Stats Grid -->
+        <div class="grid grid-cols-2 gap-3">
+            <div class="glass rounded-2xl p-4 flex flex-col justify-between">
+                <span class="text-xs text-slate-400 font-medium">Auto-Replies</span>
+                <div class="flex items-baseline space-x-1 mt-2">
+                    <span class="text-2xl font-bold text-white" id="repliedCount">0</span>
+                    <span class="text-xs text-slate-400">বার</span>
+                </div>
+            </div>
+            <div class="glass rounded-2xl p-4 flex flex-col justify-between">
+                <span class="text-xs text-slate-400 font-medium">Uptime</span>
+                <div class="flex items-baseline space-x-1 mt-2">
+                    <span class="text-2xl font-bold text-white" id="uptimeMinutes">0</span>
+                    <span class="text-xs text-slate-400">মিনিট</span>
+                </div>
+            </div>
+            <div class="glass rounded-2xl p-4 flex flex-col justify-between col-span-2">
+                <span class="text-xs text-slate-400 font-medium">AI Model</span>
+                <div class="flex items-center justify-between mt-1">
+                    <span class="text-sm font-semibold text-emerald-400" id="modelDisplay">Gemini 3.5 Flash Lite</span>
+                    <span class="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-md font-mono">100% Free</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activity Feed -->
+        <div class="glass rounded-2xl p-4">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-xs uppercase tracking-wider font-semibold text-slate-300">Live Activity Feed</h3>
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+            </div>
+            <div id="logsContainer" class="space-y-2 max-h-40 overflow-y-auto text-xs text-slate-400 font-mono">
+                <div class="p-2 rounded-lg bg-slate-900/50 border border-slate-800/80">
+                    🟢 সিস্টেম প্রস্তুত এবং সক্রিয়। ইনকামিং মেসেজের অপেক্ষায়...
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="w-full max-w-md text-center py-2 text-[11px] text-slate-400">
+        Personal AI Assistant for <span class="text-slate-300 font-medium">Md. Monjurul Islam Sir</span>
+    </footer>
+
+    <!-- Frontend Script -->
+    <script>
+        let currentStatus = true;
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                updateUI(data);
+            } catch (err) {
+                console.error('Failed to fetch status:', err);
+            }
+        }
+
+        function updateUI(data) {
+            currentStatus = data.isActive;
+            document.getElementById('ownerNameDisplay').innerText = data.ownerName || 'Md. Monjurul Islam Sir';
+            document.getElementById('repliedCount').innerText = data.repliedCount || 0;
+            document.getElementById('uptimeMinutes').innerText = data.uptimeMinutes || 0;
+            document.getElementById('modelDisplay').innerText = data.model || 'Gemini 3.5 Flash Lite';
+
+            // QR Code vs Connected Switch
+            const qrCard = document.getElementById('qrCard');
+            const connectionBadge = document.getElementById('connectionBadge');
+
+            if (!data.isConnected && data.qrCode) {
+                document.getElementById('qrImage').src = data.qrCode;
+                qrCard.classList.remove('hidden');
+                connectionBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span><span class="text-xs font-semibold text-amber-400">Scan QR</span>';
+            } else {
+                qrCard.classList.add('hidden');
+                connectionBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span><span class="text-xs font-semibold text-emerald-400">Connected</span>';
+            }
+
+            const statusText = document.getElementById('statusText');
+            const statusDesc = document.getElementById('statusDesc');
+            const btnBg = document.getElementById('btnBg');
+            const toggleKnob = document.getElementById('toggleKnob');
+            const knobIcon = document.getElementById('knobIcon');
+            const switchLabel = document.getElementById('switchLabel');
+            const glowLight = document.getElementById('glowLight');
+
+            if (currentStatus) {
+                statusText.innerText = 'ACTIVE';
+                statusText.className = 'text-3xl font-extrabold text-emerald-400 tracking-tight transition-colors duration-300';
+                statusDesc.innerText = 'স্বয়ংক্রিয়ভাবে ইনকামিং মেসেজের রিপ্লাই দেওয়া হচ্ছে';
+                btnBg.className = 'absolute inset-0 rounded-full bg-emerald-600 transition-colors duration-300';
+                toggleKnob.className = 'toggle-dot relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-xl transform translate-x-20';
+                knobIcon.className = 'w-8 h-8 text-emerald-600 transition-colors duration-300';
+                knobIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>';
+                switchLabel.innerText = 'ON';
+                switchLabel.className = 'absolute left-6 text-sm font-extrabold tracking-wider uppercase text-white transition-opacity duration-300';
+                glowLight.className = 'absolute -top-24 -left-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none';
+            } else {
+                statusText.innerText = 'OFF';
+                statusText.className = 'text-3xl font-extrabold text-rose-500 tracking-tight transition-colors duration-300';
+                statusDesc.innerText = 'এজেন্ট সাময়িকভাবে বন্ধ আছে (কোনো রিপ্লাই দেওয়া হবে না)';
+                btnBg.className = 'absolute inset-0 rounded-full bg-slate-700 transition-colors duration-300';
+                toggleKnob.className = 'toggle-dot relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-slate-300 shadow-xl transform translate-x-0';
+                knobIcon.className = 'w-8 h-8 text-slate-700 transition-colors duration-300';
+                knobIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>';
+                switchLabel.innerText = 'OFF';
+                switchLabel.className = 'absolute right-6 text-sm font-extrabold tracking-wider uppercase text-slate-400 transition-opacity duration-300';
+                glowLight.className = 'absolute -top-24 -left-24 w-48 h-48 bg-rose-500/10 rounded-full blur-3xl pointer-events-none';
+            }
+
+            // Update live logs
+            if (data.recentLogs && data.recentLogs.length > 0) {
+                const logsHtml = data.recentLogs.map(log => `
+                    <div class="p-2 rounded-lg bg-slate-900/50 border border-slate-800/80">
+                        ${log}
+                    </div>
+                `).join('');
+                document.getElementById('logsContainer').innerHTML = logsHtml;
+            }
+        }
+
+        async function toggleAgent() {
+            try {
+                const res = await fetch('/api/toggle', { method: 'POST' });
+                const data = await res.json();
+                updateUI(data);
+            } catch (err) {
+                console.error('Toggle failed:', err);
+            }
+        }
+
+        // Auto-refresh every 3 seconds
+        setInterval(fetchStatus, 3000);
+        fetchStatus();
+    </script>
+</body>
+</html>
