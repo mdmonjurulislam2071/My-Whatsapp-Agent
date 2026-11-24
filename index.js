@@ -7,7 +7,8 @@ const {
     default: makeWASocket,
     useMultiFileAuthState,
     DisconnectReason,
-    fetchLatestBaileysVersion
+    fetchLatestBaileysVersion,
+    WAMessageStubType
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
@@ -255,83 +256,35 @@ async function startWhatsAppBot() {
         }
     });
 
-    // ৬. মিসড কল অটো-রিপ্লাই ইভেন্ট
-    const acceptedCalls = new Set();
-    const handledCalls = new Set();
-
-    sock.ev.on('call', async (callEvents) => {
-        if (!isAgentActive) return;
-
-        for (const call of callEvents) {
-            // গ্রুপ কল হলে ইগনোর
-            if (call.isGroup) continue;
-
-            const callId = call.id;
-            const callerJid = call.chatId || call.from;
-
-            // শুধুমাত্র ব্যক্তিগত WhatsApp নম্বর ফিল্টার
-            if (!callerJid || (!callerJid.endsWith('@s.whatsapp.net') && !callerJid.endsWith('@lid'))) {
-                continue;
-            }
-
-            // আপনি নিজে ফোন রিসিভ করলে রেকর্ড রাখা (যেন পরে মিসড কল মেসেজ না যায়)
-            if (call.status === 'accept') {
-                acceptedCalls.add(callId);
-                continue;
-            }
-
-            // কল মিসড হয়েছে কি না যাচাই (টাইমআউট হওয়া বা রিসিভ না করেই কেটে যাওয়া)
-            const isMissed = call.status === 'timeout' || (call.status === 'terminate' && !acceptedCalls.has(callId));
-
-            if (isMissed && !handledCalls.has(callId)) {
-                handledCalls.add(callId);
-
-                // মেমোরি লিমিট বজায় রাখা
-                if (handledCalls.size > 200) handledCalls.clear();
-                if (acceptedCalls.size > 200) acceptedCalls.clear();
-
-                console.log(`\n📞 [মিসড কল শনাক্ত] ${callerJid} থেকে কল এসেছে কিন্তু রিসিভ করা হয়নি।`);
-
-                const missedCallMessage = `আসসালামু আলাইকুম। দুঃখিত, ${config.ownerName} এই মুহূর্তে আপনার কলটি রিসিভ করতে পারেননি। তিনি ফ্রি হয়ে যত দ্রুত সম্ভব আপনার সাথে যোগাযোগ করবেন।\n\nআপনার কোনো জরুরি কথা বা বার্তা থাকলে এখানে লিখে রাখতে পারেন, আমি স্যারকে জানিয়ে দেব।`;
-
-                try {
-                    await sock.sendMessage(callerJid, { text: missedCallMessage });
-                    // এআই মেমোরিতেও রেকর্ড রাখা যেন এআই মনে রাখে যে তিনি একটু আগে কল করেছিলেন
-                    addToHistory(callerJid, 'user', '[Missed Call: কল করেছিলেন কিন্তু রিসিভ করা হয়নি]');
-                    addToHistory(callerJid, 'model', missedCallMessage);
-                    addLog(`📞 [মিসড কল]: ${callerJid} থেকে কল এসেছিল (অটো-মেসেজ পাঠানো হয়েছে)`);
-                    console.log(`📤 মিসড কলের অটো-রিপ্লাই সফলভাবে পাঠানো হয়েছে: ${callerJid}`);
-                } catch (err) {
-                    console.error('❌ মিসড কল রিপ্লাই পাঠাতে সমস্যা:', err.message);
-                }
-            }
-        }
-    });
-
-    // ইনকামিং মেসেজ ইভেন্ট
+    // ৬. ইনকামিং মেসেজ ও মিসড কল হ্যান্ডলিং
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
 
         for (const msg of messages) {
-            if (!msg.message) continue;
-
             const fromMe = msg.key.fromMe;
             const jid = msg.key.remoteJid;
 
-            // মেসেজ টেক্সট বের করা
-            const messageText = (
-                msg.message.conversation ||
-                msg.message.extendedTextMessage?.text ||
-                msg.message.imageMessage?.caption ||
-                ''
-            ).trim();
+            // শুধুমাত্র ব্যক্তিগত চ্যাট ফিল্টার (গ্রুপ বা চ্যানেল ইগনোর)
+            const isGroup = jid?.endsWith('@g.us');
+            const isNewsletter = jid?.endsWith('@newsletter');
+            const isBroadcast = jid?.includes('@broadcast');
+            const isPersonalChat = jid?.endsWith('@s.whatsapp.net') || jid?.endsWith('@lid');
 
-            if (!messageText) continue;
+            if (isGroup || isNewsletter || isBroadcast || !isPersonalChat) {
+                continue;
+            }
 
             // -------------------------------------------------------------
             // ক. রিমোট কন্ট্রোল কমান্ড (মালিক নিজের ফোন থেকে কন্ট্রোল করবেন)
             // -------------------------------------------------------------
-            if (fromMe) {
+            const messageText = (
+                msg.message?.conversation ||
+                msg.message?.extendedTextMessage?.text ||
+                msg.message?.imageMessage?.caption ||
+                ''
+            ).trim();
+
+            if (fromMe && messageText) {
                 const cmd = messageText.toLowerCase();
 
                 if (cmd === '!bot on') {
@@ -381,21 +334,40 @@ async function startWhatsAppBot() {
             }
 
             // -------------------------------------------------------------
-            // খ. অন্যদের মেসেজের অটো-রিপ্লাই (শুধুমাত্র পার্সোনাল মেসেজ)
+            // খ. প্রকৃত মিসড কল শনাক্তকরণ (অফিসিয়াল WhatsApp স্টাব)
+            // এটি কেবল তখনই ফায়ার হবে যখন কল সত্যি সত্যি রিসিভ করা হয়নি।
+            // আপনি নিজে ফোন রিসিভ করে কথা বললে এটি কখনো মেসেজ পাঠাবে না!
             // -------------------------------------------------------------
+            const isMissedCall = !fromMe && (
+                msg.messageStubType === WAMessageStubType.CALL_MISSED_VOICE ||
+                msg.messageStubType === WAMessageStubType.CALL_MISSED_VIDEO ||
+                msg.messageStubType === 40 ||
+                msg.messageStubType === 41
+            );
 
-            // ১. এজেন্ট অফ থাকলে কিছু করবে না
-            if (!isAgentActive) continue;
+            if (isMissedCall) {
+                if (!isAgentActive) continue;
 
-            // ২. গ্রুপ, চ্যানেল ও ব্রডকাস্ট ১০০% নিষিদ্ধ (কেবল পার্সোনাল চ্যাটে রিপ্লাই যাবে)
-            const isGroup = jid.endsWith('@g.us');
-            const isNewsletter = jid.endsWith('@newsletter');
-            const isBroadcast = jid.includes('@broadcast');
-            const isPersonalChat = jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid');
+                console.log(`\n📞 [প্রকৃত মিসড কল শনাক্ত] ${jid} কল করেছিলেন কিন্তু রিসিভ করা হয়নি।`);
 
-            if (isGroup || isNewsletter || isBroadcast || !isPersonalChat) {
-                continue; // গ্রুপ বা চ্যানেলে কখনো কোনো রিপ্লাই যাবে না
+                const missedCallMessage = `আসসালামু আলাইকুম। দুঃখিত, ${config.ownerName} এই মুহূর্তে আপনার কলটি রিসিভ করতে পারেননি। তিনি ফ্রি হয়ে যত দ্রুত সম্ভব আপনার সাথে যোগাযোগ করবেন।\n\nআপনার কোনো জরুরি কথা বা বার্তা থাকলে এখানে লিখে রাখতে পারেন, আমি স্যারকে জানিয়ে দেব।`;
+
+                try {
+                    await sock.sendMessage(jid, { text: missedCallMessage });
+                    addToHistory(jid, 'user', '[Missed Call: কল করেছিলেন কিন্তু রিসিভ করা হয়নি]');
+                    addToHistory(jid, 'model', missedCallMessage);
+                    addLog(`📞 [মিসড কল]: ${jid} থেকে মিসড কল এসেছিল (অটো-মেসেজ পাঠানো হয়েছে)`);
+                    console.log(`📤 মিসড কলের অটো-রিপ্লাই সফলভাবে পাঠানো হয়েছে: ${jid}`);
+                } catch (err) {
+                    console.error('❌ মিসড কল রিপ্লাই পাঠাতে সমস্যা:', err.message);
+                }
+                continue;
             }
+
+            // -------------------------------------------------------------
+            // গ. সাধারণ টেক্সট মেসেজের অটো-রিপ্লাই
+            // -------------------------------------------------------------
+            if (!isAgentActive || fromMe || !messageText) continue;
 
             const senderName = msg.pushName || 'User';
             console.log(`\n📩 [নতুন মেসেজ] ${senderName} (${jid}): "${messageText}"`);
