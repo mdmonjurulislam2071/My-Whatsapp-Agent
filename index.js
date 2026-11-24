@@ -190,7 +190,8 @@ app.post('/api/toggle', (req, res) => {
 });
 
 // যেকোনো সাব-পাথ (যেমন /render বা /dashboard) লিখলেও যাতে মূল ড্যাশবোর্ড লোড হয়
-app.get('*', (req, res, next) => {
+app.use((req, res, next) => {
+    if (req.method !== 'GET') return next();
     if (req.path.startsWith('/api/') || req.path.includes('.')) {
         return next();
     }
