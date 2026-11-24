@@ -2,7 +2,7 @@ require('dotenv').config();
 
 module.exports = {
     geminiApiKey: process.env.GEMINI_API_KEY || '',
-    ownerName: process.env.OWNER_NAME || 'Owner',
+    ownerName: process.env.OWNER_NAME || 'Md. Monjurul Islam Sir',
     agentName: process.env.AGENT_NAME || 'Personal AI Assistant',
     geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
     defaultActive: process.env.AUTO_REPLY_ACTIVE !== 'false',
