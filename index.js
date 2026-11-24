@@ -101,6 +101,13 @@ function clearChatHistory(chatId) {
     }
 }
 
+// নির্দিষ্ট নম্বর ইগনোর করার ফাংশন (ব্লকলিস্ট)
+function isIgnoredContact(jid, participant = null) {
+    if (!jid && !participant) return false;
+    const list = config.ignoredNumbers || [];
+    return list.some(num => (jid && jid.includes(num)) || (participant && participant.includes(num)));
+}
+
 // ৪. এজেন্ট স্টেট (অন / অফ টগল) ও লাইভ লগস
 let isAgentActive = config.defaultActive;
 let isConnected = false;
@@ -271,6 +278,11 @@ async function startWhatsAppBot() {
             const isPersonalChat = jid?.endsWith('@s.whatsapp.net') || jid?.endsWith('@lid');
 
             if (isGroup || isNewsletter || isBroadcast || !isPersonalChat) {
+                continue;
+            }
+
+            // নির্দিষ্ট নম্বর ইগনোর (ব্লকলিস্ট - এই নম্বরে কোনো অটো-রিপ্লাই বা মিসড কল মেসেজ যাবে না)
+            if (!fromMe && isIgnoredContact(jid, msg.key.participant)) {
                 continue;
             }
 
