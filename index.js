@@ -189,6 +189,14 @@ app.post('/api/toggle', (req, res) => {
     });
 });
 
+// যেকোনো সাব-পাথ (যেমন /render বা /dashboard) লিখলেও যাতে মূল ড্যাশবোর্ড লোড হয়
+app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.includes('.')) {
+        return next();
+    }
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 function getLocalIp() {
     const interfaces = os.networkInterfaces();
     for (const name of Object.keys(interfaces)) {
