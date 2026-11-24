@@ -343,9 +343,6 @@ async function startWhatsAppBot() {
 
                 try {
                     await sock.sendMessage(callerJid, { text: callReplyMessage });
-                    if (callerJid !== rawCallerJid) {
-                        try { await sock.sendMessage(rawCallerJid, { text: callReplyMessage }); } catch (_) {}
-                    }
                     addToHistory(callerJid, 'user', `[Call: ${actionLabel}]`);
                     addToHistory(callerJid, 'model', callReplyMessage);
                     addLog(`📞 [কল]: ${callerJid} (${actionLabel} -> অটো-মেসেজ পাঠানো হয়েছে)`);
@@ -470,9 +467,6 @@ async function startWhatsAppBot() {
 
                 try {
                     await sock.sendMessage(targetJid, { text: missedCallMessage });
-                    if (targetJid !== jid) {
-                        try { await sock.sendMessage(jid, { text: missedCallMessage }); } catch (_) {}
-                    }
                     addToHistory(targetJid, 'user', '[Missed Call: কল করেছিলেন কিন্তু রিসিভ করা হয়নি]');
                     addToHistory(targetJid, 'model', missedCallMessage);
                     addLog(`📞 [মিসড কল]: ${targetJid} থেকে মিসড কল এসেছিল (অটো-মেসেজ পাঠানো হয়েছে)`);
@@ -512,9 +506,6 @@ async function startWhatsAppBot() {
 
                 // রিপ্লাই পাঠানো (targetJid তে পাঠালে তা আপনার ফোন ও ডেস্কটপ চ্যাটলিস্টে ✔✔ সহ সুন্দরভাবে দেখাবে)
                 await sock.sendMessage(targetJid, { text: replyText });
-                if (targetJid !== jid) {
-                    try { await sock.sendMessage(jid, { text: replyText }); } catch (_) {}
-                }
 
                 repliedCount++;
                 addLog(`📤 [রিপ্লাই -> ${senderName}]: "${replyText.substring(0, 35)}..."`);
